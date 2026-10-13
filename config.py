@@ -1,4 +1,4 @@
-"""Asetukset luetaan ympäristömuuttujista / .env-tiedostosta."""
+"""PRIME-data-agentin asetukset: luetaan .env- ja mcp.json-tiedostoista."""
 
 import json
 import os
@@ -23,10 +23,14 @@ def _required(name: str) -> str:
 class Settings:
     fabric_mcp_url: str
     tenant_id: str | None
+    mcp_read_timeout_s: float
+    # GitHub Copilot (agent.py)
+    copilot_model: str | None
+    answer_timeout_s: float
+    # Claude (agent_claude.py, valinnainen)
     model: str
     effort: str
     max_tokens: int
-    mcp_read_timeout_s: float
 
 
 def _url_from_mcp_json(path: Path, server_name: str | None) -> str | None:
@@ -64,10 +68,14 @@ def load_settings() -> Settings:
     return Settings(
         fabric_mcp_url=url,
         tenant_id=os.getenv("AZURE_TENANT_ID") or None,
-        model=os.getenv("CLAUDE_MODEL", "claude-opus-5-5"),
-        effort=os.getenv("CLAUDE_EFFORT", "medium"),
-        max_tokens=int(os.getenv("CLAUDE_MAX_TOKENS", "16000")),
         # Data agent voi ajaa useita kyselyitä yhteen kysymykseen, joten
         # lukutimeout on reilu.
         mcp_read_timeout_s=float(os.getenv("MCP_READ_TIMEOUT_S", "600")),
+        # Tyhjä = Copilotin oletusmalli. Saatavilla olevat: agent.py --list-models
+        copilot_model=os.getenv("COPILOT_MODEL") or None,
+        # Yksi vastaus voi sisältää useita Fabric-kutsuja.
+        answer_timeout_s=float(os.getenv("ANSWER_TIMEOUT_S", "900")),
+        model=os.getenv("CLAUDE_MODEL", "claude-opus-5-5"),
+        effort=os.getenv("CLAUDE_EFFORT", "medium"),
+        max_tokens=int(os.getenv("CLAUDE_MAX_TOKENS", "16000")),
     )

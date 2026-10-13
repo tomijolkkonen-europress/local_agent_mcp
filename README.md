@@ -1,37 +1,65 @@
-# local_agent_mcp
+# PRIME-data-agentti (local_agent_mcp)
 
-Lokaali data-agentti, joka käyttää Microsoft Fabricin data agentia MCP:n kautta.
+Lokaalisti ajettava, Pythonilla tehty data-agentti **PRIME ERP -projektin Azure DevOps -sisällön tutkimiseen**.
+
+Agentti on MCP-yhteydessä Microsoft Fabricin data agentiin (**PRIME_Knowledge_DataAgent**), joka toimii MCP-serverinä. Fabricin data agentti hakee tiedot Fabric Lakehousesta, jonne PRIME:n DevOps-data on tuotu ja jalostettu. Paikallinen agentti on MCP-client. Kielimallina se käyttää **GitHub Copilotia**, joka päättää, mitä Fabricilta kysytään, ja kokoaa vastaukset.
 
 ```
-käyttäjä ──> agent.py (Claude, päättely) ──> fabric_mcp.py (MCP-client) ──HTTP──> Fabric data agent (MCP-serveri)
+käyttäjä ─> agent.py ─────────────> GitHub Copilot (kielimalli)
+              │
+              └─ fabric_mcp.py ──MCP/HTTP──> Fabric data agent (MCP-serveri) ──> PRIME DevOps -data (Lakehouse)
 ```
 
-- `agent.py` – Claude-agentti (Anthropic SDK:n tool runner). Fabricin data agentin MCP-työkalu annetaan Claudelle työkaluksi.
-- `fabric_mcp.py` – MCP-client (streamable HTTP). Hakee Fabric-tokenin `azure-identity`:llä (`az login` tai selainkirjautuminen) ja liittää sen jokaiseen pyyntöön.
-- `config.py` – asetukset `.env`- ja `mcp.json`-tiedostoista.
+Agentilta voi kysyä PRIME:n domaineista, liiketoimintaprosesseista, capabilityistä, use caseista, vaatimuksista, User Storyistä, taskeista sekä niiden välisistä riippuvuuksista. Hierarkia on Domain → Capability → Use Case → Requirement → User Story → Task.
 
-## Asennus
+## Tiedostot
 
-```powershell
+| Tiedosto | Tehtävä |
+|---|---|
+| `agent.py` | Data-agentti, jonka kielimallina on GitHub Copilot (Copilot SDK). Vain Fabric-työkalu on sallittu; Copilotin omat työkalut (komentorivi, tiedostot) on estetty. |
+| `fabric_mcp.py` | MCP-client Fabricin data agentille. Hoitaa Entra ID -kirjautumisen (`az login` tai selain) ja liittää Fabric-tokenin jokaiseen pyyntöön. |
+| `config.py` | Asetukset `mcp.json`- ja `.env`-tiedostoista. |
+| `agent_claude.py` | Valinnainen versio, jonka kielimallina on Claude (Anthropic API). |
+| `mcp.example.json` | Malli Fabricista ladattavalle `mcp.json`-tiedostolle. |
+
+## Vaatimukset
+
+- Python 3.11 tai uudempi
+- GitHub Copilot -lisenssi
+- Pääsy Fabric-workspaceen, jossa PRIME_Knowledge_DataAgent on (agentin pitää olla julkaistu)
+
+## Asennus (kerran)
+
+Komennot ovat Git Bashille. PowerShellissä käytä `\`-merkkiä `/`-merkin sijaan.
+
+```bash
+cd ~/Documents/Codes/local_agent_mcp
+
+# 1. Python-ympäristö
 python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env      # aseta ANTHROPIC_API_KEY
+.venv/Scripts/python -m pip install -r requirements.txt
+
+# 2. Copilot CLI ja GitHub-kirjautuminen
+winget install GitHub.Copilot
+copilot          # kirjoita /login, kirjaudu GitHubiin selaimessa, poistu: /exit
 ```
 
-Lataa data agentin `mcp.json` Fabricista (data agent → Settings → Model Context Protocol) ja tallenna se repon juureen nimellä `mcp.json` (mallina `mcp.example.json`). Tiedosto on .gitignoressa.
-
-Data agentin pitää olla **julkaistu**, ja tunnuksellasi pitää olla pääsy workspaceen ja agenttiin.
+3. Lataa `mcp.json` Fabricista (PRIME_Knowledge_DataAgent → Settings → Model Context Protocol) ja tallenna se tämän kansion juureen. Tiedosto on `.gitignore`ssa.
 
 ## Käyttö
 
-```powershell
-.\.venv\Scripts\python agent.py --list-tools   # testaa MCP-yhteys
-.\.venv\Scripts\python agent.py "Mitä dataa sinulla on?"
-.\.venv\Scripts\python agent.py                # interaktiivinen keskustelu
+```bash
+.venv/Scripts/python agent.py --list-tools    # testaa Fabric-yhteys
+.venv/Scripts/python agent.py                 # keskustelu
+.venv/Scripts/python agent.py "Mitä logistiikan use caseja PRIME:ssa on?"
+.venv/Scripts/python agent.py --list-models   # käytettävissä olevat Copilot-mallit
 ```
 
-Ensimmäisellä kerralla avautuu selainkirjautuminen (jos Azure CLI:n `az login` ei ole käytössä).
+Ensimmäisellä käyttökerralla avautuu Microsoft-kirjautuminen Fabriciin. Keskustelussa `→`-rivit näyttävät, mitä agentti kysyi Fabricilta. Agentti muistaa keskustelun, joten jatkokysymyksiä voi esittää. Tyhjä rivi tai `exit` lopettaa.
 
-## Huomio tietoturvasta
+Mallin voi vaihtaa `.env`-tiedostossa asetuksella `COPILOT_MODEL` (ks. `.env.example`).
 
-Data agentin vastaukset (eli Fabricin dataa) lähetetään Anthropicin API:in Clauden käsiteltäväksi, eli Fabricin compliance-rajan ulkopuolelle. Varmista ennen käyttöä, että tämä on sallittua datan luokituksen ja yrityksen tietoturvaohjeiden mukaan.
+## Tietoturva
+
+- `mcp.json` ja `.env` eivät mene GitHubiin.
+- Fabricin data agentin vastaukset, eli PRIME:n DevOps-sisältö, lähetetään Copilotin kielimallille käsiteltäväksi. Ne kulkevat siis Fabricin compliance-rajan ulkopuolelle organisaation GitHub Copilot -sopimuksen piiriin. Varmista, että tämä on sallittua datan luokituksen mukaan.

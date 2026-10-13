@@ -1,123 +1,137 @@
-﻿"""Lokaali data-agentti: Claude päättelee, Fabricin data agent (MCP) vastaa datasta.
+"""PRIME-data-agentti: lokaalisti ajettava Python-agentti PRIME ERP -projektin
+Azure DevOps -sisällön tutkimiseen.
+
+Kielimalli tulee GitHub Copilotista (Copilot SDK). Data haetaan Fabricin data
+agentista (PRIME_Knowledge_DataAgent), joka on MCP-serveri; tämä ohjelma on sen
+MCP-client.
 
 Käyttö:
     python agent.py                 # interaktiivinen keskustelu
     python agent.py "kysymys"       # yksittäinen kysymys
-    python agent.py --list-tools    # testaa MCP-yhteys ja listaa työkalut
+    python agent.py --list-tools    # testaa Fabric-yhteys ja listaa työkalut
+    python agent.py --list-models   # listaa käytettävissä olevat Copilot-mallit
 """
 
 import argparse
 import asyncio
 import json
 
-from anthropic import AsyncAnthropic
-from anthropic.lib.tools.mcp import async_mcp_tool
-from anthropic.types.beta import BetaMessageParam
+from copilot import CopilotClient, Tool, ToolInvocation, ToolResult, convert_mcp_call_tool_result
+from copilot.generated.rpc import PermissionDecisionReject
+from copilot.generated.session_events import AssistantMessageData, ToolExecutionStartData
+from mcp import ClientSession
 
-from config import Settings, load_settings
+from config import load_settings
 from fabric_mcp import connect
 
 SYSTEM_PROMPT = """\
-You are a data assistant running on the user's machine. You answer questions about \
-the organization's data by calling the Fabric data agent tool, which queries data in \
-Microsoft Fabric and returns grounded answers.
+You are the PRIME data agent. You help the user explore the Azure DevOps content of \
+the PRIME ERP project: domains, business processes, capabilities, use cases, \
+requirements, user stories, tasks, and the dependencies between them.
 
-- Use the tool for any question that depends on the organization's data. You can call \
-it several times to break a complex question into focused sub-questions.
-- Report figures exactly as the tool returns them, and say which question you asked \
-the tool when it helps the user judge the answer. Never invent data.
+You get the data by calling the Fabric data agent tool, which queries PRIME DevOps \
+data refined in a Fabric Lakehouse. The hierarchy is \
+Domain → Capability → Use Case → Requirement → User Story → Task.
+
+- Use the tool for every question that depends on PRIME data. Break broad or \
+multi-level questions into focused sub-questions, one hierarchy level at a time, \
+and combine the answers.
+- Report names, IDs, states and counts exactly as the tool returns them. Never \
+invent work items or data.
 - If the tool returns an error, no data, or an ambiguous answer, say so plainly.
-- Answer in the user's language."""
-
-# Palvelinpuolen fallback: jos turvaluokitin hylkää pyynnön, API ohjaa sen
-# automaattisesti toiselle mallille.
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+- Answer in the user's language. Use tables or lists when they make the answer \
+easier to read."""
 
 
-def _print_tool_calls(message) -> None:
-    for block in message.content:
-        if block.type == "tool_use":
-            print(f"  → {block.name}({json.dumps(block.input, ensure_ascii=False)})")
+def mcp_to_copilot_tool(mcp_tool, mcp_session: ClientSession) -> Tool:
+    """Kääri Fabricin MCP-työkalun Copilotin työkaluksi.
 
+    MCP-yhteys (ja Fabric-autentikointi) pysyy tämän ohjelman hallussa;
+    Copilot saa vain työkalun kuvauksen ja kutsuu sitä tämän handlerin kautta.
+    """
 
-async def run_turn(
-    client: AsyncAnthropic,
-    settings: Settings,
-    tools: list,
-    messages: list[BetaMessageParam],
-) -> str:
-    """Ajaa yhden käyttäjän vuoron loppuun ja lisää sen viestit `messages`-historiaan."""
-    runner = client.beta.messages.tool_runner(
-        model=settings.model,
-        max_tokens=settings.max_tokens,
-        system=SYSTEM_PROMPT,
-        tools=tools,
-        messages=messages,
-        thinking={"type": "adaptive"},
-        output_config={"effort": settings.effort},
-        betas=[FALLBACK_BETA],
-        fallbacks="default",
+    async def handler(invocation: ToolInvocation) -> ToolResult:
+        result = await mcp_session.call_tool(mcp_tool.name, invocation.arguments or {})
+        return convert_mcp_call_tool_result(result.model_dump(mode="json", by_alias=True))
+
+    return Tool(
+        name=mcp_tool.name,
+        description=mcp_tool.description or "",
+        parameters=mcp_tool.input_schema,
+        handler=handler,
+        # Lukukysely omaan dataan: ei erillistä hyväksyntää joka kutsulle.
+        skip_permission=True,
     )
 
-    last = None
-    async for message in runner:
-        last = message
-        _print_tool_calls(message)
-        # Runner pitää oman kopionsa historiasta, joten peilataan se tänne,
-        # jotta seuraava kysymys näkee koko keskustelun. Sisältö lisätään
-        # muuttamattomana (myös thinking-lohkot).
-        messages.append({"role": "assistant", "content": message.content})
-        tool_response = await runner.generate_tool_call_response()
-        if tool_response is not None:
-            messages.append(tool_response)
 
-    if last is None:
+def deny_everything_else(request, invocation):
+    # Copilot-ajoympäristössä on omia työkaluja (komentorivi, tiedostot, verkko).
+    # Agentti saa käyttää vain Fabric-työkalua, joten muut pyynnöt hylätään.
+    return PermissionDecisionReject(feedback="Only the PRIME Fabric data tool is allowed.")
+
+
+def print_tool_calls(event) -> None:
+    if isinstance(event.data, ToolExecutionStartData):
+        args = json.dumps(event.data.arguments, ensure_ascii=False)
+        print(f"  → {event.data.tool_name}({args})", flush=True)
+
+
+async def ask(session, question: str, timeout: float) -> str:
+    reply = await session.send_and_wait(question, timeout=timeout)
+    if reply is None or not isinstance(reply.data, AssistantMessageData):
         return "(ei vastausta)"
-    if last.stop_reason == "refusal":
-        return "(Malli kieltäytyi vastaamasta tähän pyyntöön.)"
-
-    text = "\n".join(b.text for b in last.content if b.type == "text").strip()
-    if last.stop_reason == "max_tokens":
-        text += "\n\n(Vastaus katkesi max_tokens-rajaan.)"
-    return text or "(tyhjä vastaus)"
+    return reply.data.content or "(tyhjä vastaus)"
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Lokaali data-agentti Fabricin data agentin päällä")
+    parser = argparse.ArgumentParser(description="PRIME-data-agentti (GitHub Copilot + Fabric data agent MCP)")
     parser.add_argument("question", nargs="?", help="yksittäinen kysymys (muuten interaktiivinen tila)")
-    parser.add_argument("--list-tools", action="store_true", help="listaa MCP-serverin työkalut ja lopeta")
+    parser.add_argument("--list-tools", action="store_true", help="listaa Fabricin MCP-työkalut ja lopeta")
+    parser.add_argument("--list-models", action="store_true", help="listaa Copilot-mallit ja lopeta")
     args = parser.parse_args()
 
     settings = load_settings()
 
-    async with connect(settings) as session:
-        mcp_tools = (await session.list_tools()).tools
+    if args.list_models:
+        async with CopilotClient() as client:
+            for m in await client.list_models():
+                print(f"{m.id:30} {m.name}")
+        return
+
+    async with connect(settings) as mcp_session:
+        mcp_tools = (await mcp_session.list_tools()).tools
 
         if args.list_tools:
             for t in mcp_tools:
                 print(f"{t.name}\n  {t.description}\n  schema: {json.dumps(t.input_schema, ensure_ascii=False)}")
             return
 
-        tools = [async_mcp_tool(t, session) for t in mcp_tools]
-        client = AsyncAnthropic()
-        messages: list[BetaMessageParam] = []
+        tools = [mcp_to_copilot_tool(t, mcp_session) for t in mcp_tools]
 
-        if args.question:
-            messages.append({"role": "user", "content": args.question})
-            print(await run_turn(client, settings, tools, messages))
-            return
+        async with CopilotClient() as client:
+            async with await client.create_session(
+                model=settings.copilot_model,
+                tools=tools,
+                # Sallittujen työkalujen lista: vain Fabric-työkalut näkyvät mallille.
+                available_tools=[t.name for t in tools],
+                on_permission_request=deny_everything_else,
+                system_message={"mode": "replace", "content": SYSTEM_PROMPT},
+                on_event=print_tool_calls,
+            ) as session:
+                if args.question:
+                    print(await ask(session, args.question, settings.answer_timeout_s))
+                    return
 
-        print(f"Yhdistetty. Työkalut: {', '.join(t.name for t in mcp_tools)}")
-        print("Kirjoita kysymys (tyhjä rivi tai 'exit' lopettaa).\n")
-        while True:
-            try:
-                question = (await asyncio.to_thread(input, "> ")).strip()
-            except (EOFError, KeyboardInterrupt):
-                break
-            if not question or question.lower() in {"exit", "quit"}:
-                break
-            messages.append({"role": "user", "content": question})
-            print(f"\n{await run_turn(client, settings, tools, messages)}\n")
+                print(f"PRIME-data-agentti valmis. Työkalut: {', '.join(t.name for t in tools)}")
+                print("Kirjoita kysymys (tyhjä rivi tai 'exit' lopettaa).\n")
+                while True:
+                    try:
+                        question = (await asyncio.to_thread(input, "kysymys> ")).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    if not question or question.lower() in {"exit", "quit"}:
+                        break
+                    print(f"\n{await ask(session, question, settings.answer_timeout_s)}\n")
 
 
 if __name__ == "__main__":

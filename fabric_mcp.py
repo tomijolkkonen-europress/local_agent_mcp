@@ -1,4 +1,8 @@
-"""Lokaali MCP-client Fabricin data agentin MCP-serverille (streamable HTTP)."""
+"""MCP-client Fabricin PRIME_Knowledge_DataAgentille.
+
+Fabricin data agent on MCP-serveri (streamable HTTP); tämä moduuli avaa siihen
+yhteyden ja hoitaa Entra ID -autentikoinnin (Fabric-bearer-token).
+"""
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
