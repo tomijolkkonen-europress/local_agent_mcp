@@ -1,0 +1,4 @@
+anthropic[mcp]>=1.13
+mcp>=2.3
+azure-identity>=1.26
+python-dotenv>=1.0

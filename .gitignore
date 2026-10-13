@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Fabric MCP -palvelimen konfiguraatio (sisaiset workspace-/agentti-ID:t)
+mcp.json
