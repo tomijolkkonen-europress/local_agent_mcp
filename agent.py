@@ -92,23 +92,33 @@ async def main() -> None:
 
     settings = load_settings()
 
-    if args.list_models:
-        async with CopilotClient() as client:
-            for m in await client.list_models():
-                print(f"{m.id:30} {m.name}")
+    if args.list_tools:
+        async with connect(settings) as mcp_session:
+            for t in (await mcp_session.list_tools()).tools:
+                print(f"{t.name}\n  {t.description}\n  schema: {json.dumps(t.input_schema, ensure_ascii=False)}")
         return
 
-    async with connect(settings) as mcp_session:
-        mcp_tools = (await mcp_session.list_tools()).tools
+    async with CopilotClient() as client:
+        # Tarkistetaan Copilot-kirjautuminen ennen Fabric-yhteyttä, jotta
+        # puuttuva kirjautuminen näkyy heti eikä vasta ensimmäisessä kysymyksessä.
+        auth = await client.get_auth_status()
+        if not auth.isAuthenticated:
+            raise SystemExit(
+                f"GitHub Copilot -kirjautuminen puuttuu ({auth.statusMessage}).\n"
+                "Asenna Copilot CLI ja kirjaudu kerran:\n"
+                "  winget install GitHub.Copilot\n"
+                "  copilot        # kirjoita /login, kirjaudu selaimessa, poistu /exit"
+            )
 
-        if args.list_tools:
-            for t in mcp_tools:
-                print(f"{t.name}\n  {t.description}\n  schema: {json.dumps(t.input_schema, ensure_ascii=False)}")
+        if args.list_models:
+            for m in await client.list_models():
+                print(f"{m.id:30} {m.name}")
             return
 
-        tools = [mcp_to_copilot_tool(t, mcp_session) for t in mcp_tools]
+        async with connect(settings) as mcp_session:
+            mcp_tools = (await mcp_session.list_tools()).tools
+            tools = [mcp_to_copilot_tool(t, mcp_session) for t in mcp_tools]
 
-        async with CopilotClient() as client:
             async with await client.create_session(
                 model=settings.copilot_model,
                 tools=tools,
