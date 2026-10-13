@@ -30,36 +30,40 @@ Agentilta voi kysyä PRIME:n domaineista, liiketoimintaprosesseista, capabilityi
 
 ## Asennus (kerran)
 
-Komennot ovat Git Bashille. PowerShellissä käytä `\`-merkkiä `/`-merkin sijaan.
+PowerShellissä:
 
-```bash
-cd ~/Documents/Codes/local_agent_mcp
+```powershell
+Set-Location "$HOME\Documents\Codes\local_agent_mcp"
 
 # 1. Python-ympäristö
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 # 2. Copilot CLI ja GitHub-kirjautuminen
 winget install GitHub.Copilot
-copilot          # kirjoita /login, kirjaudu GitHubiin selaimessa, poistu: /exit
+copilot
+# Kirjoita CLI:ssä /login, kirjaudu selaimessa ja poistu komennolla /exit
 ```
 
-3. Lataa `mcp.json` Fabricista (PRIME_Knowledge_DataAgent → Settings → Model Context Protocol) ja tallenna se tämän kansion juureen. Tiedosto on `.gitignore`ssa.
+Lataa `mcp.json` Fabricista (PRIME_Knowledge_DataAgent → Settings → Model Context Protocol) ja tallenna se tämän kansion juureen. Tiedosto on `.gitignore`ssa.
+
+Jos käytät mieluummin Claudea, asenna lisäksi `.\.venv\Scripts\python.exe -m pip install -r requirements-claude.txt` ja lisää `ANTHROPIC_API_KEY` `.env`-tiedostoon.
 
 ## Käyttö
 
-```bash
-.venv/Scripts/python agent.py --list-tools    # testaa Fabric-yhteys
-.venv/Scripts/python agent.py                 # keskustelu
-.venv/Scripts/python agent.py "Mitä logistiikan use caseja PRIME:ssa on?"
-.venv/Scripts/python agent.py --list-models   # käytettävissä olevat Copilot-mallit
+```powershell
+.\.venv\Scripts\python.exe agent.py --list-tools    # testaa Fabric-yhteys
+.\.venv\Scripts\python.exe agent.py                 # keskustelu
+.\.venv\Scripts\python.exe agent.py "Mitä logistiikan use caseja PRIME:ssa on?"
+.\.venv\Scripts\python.exe agent.py --list-models   # käytettävissä olevat Copilot-mallit
 ```
 
 Ensimmäisellä käyttökerralla avautuu Microsoft-kirjautuminen Fabriciin. Keskustelussa `→`-rivit näyttävät, mitä agentti kysyi Fabricilta. Agentti muistaa keskustelun, joten jatkokysymyksiä voi esittää. Tyhjä rivi tai `exit` lopettaa.
 
 Mallin voi vaihtaa `.env`-tiedostossa asetuksella `COPILOT_MODEL` (ks. `.env.example`).
+Claude-vaihtoehto käynnistyy komennolla `.\.venv\Scripts\python.exe agent_claude.py`; se käyttää `.env`-tiedoston `CLAUDE_MODEL`-asetusta.
 
 ## Tietoturva
 
-- `mcp.json` ja `.env` eivät mene GitHubiin.
+- `mcp.json` ja `.env` eivät mene GitHubiin. Myös `.venv` on rajattu pois Gitistä.
 - Fabricin data agentin vastaukset, eli PRIME:n DevOps-sisältö, lähetetään Copilotin kielimallille käsiteltäväksi. Ne kulkevat siis Fabricin compliance-rajan ulkopuolelle organisaation GitHub Copilot -sopimuksen piiriin. Varmista, että tämä on sallittua datan luokituksen mukaan.

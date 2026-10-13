@@ -2,6 +2,3 @@ github-copilot-sdk>=1.0.20
 mcp>=2.3
 azure-identity>=1.26
 python-dotenv>=1.0
-
-# Vain agent_claude.py (valinnainen Claude-versio):
-anthropic[mcp]>=1.13
